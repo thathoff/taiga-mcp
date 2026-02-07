@@ -31,7 +31,7 @@ class UserStory(BaseModel):
     status_extra_info: Optional[StatusExtraInfo] = None
     assigned_to: Optional[int] = None
     assigned_to_extra_info: Optional[UserExtraInfo] = None
-    owner: int
+    owner: Optional[int] = None
     owner_extra_info: Optional[UserExtraInfo] = None
     created_date: datetime
     modified_date: datetime
