@@ -24,6 +24,22 @@ class TaskService:
         data = await self.client.get("/tasks", params={"user_story": user_story_id})
         return [Task(**task) for task in data]
 
+    async def get_task_by_ref(self, ref: int, project_id: int) -> Task:
+        """
+        Get task by reference number and project ID.
+
+        Args:
+            ref: Task reference number
+            project_id: Project ID
+
+        Returns:
+            Task details
+        """
+        data = await self.client.get(
+            "/tasks/by_ref", params={"ref": ref, "project": project_id}
+        )
+        return Task(**data)
+
     async def get_task(self, task_id: int) -> Task:
         """
         Get task details.

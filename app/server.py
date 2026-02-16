@@ -13,7 +13,7 @@ from app.config import settings
 from app.core.auth import auth_manager
 from app.core.client import TaigaClient
 from app.core.exceptions import TaigaMCPError
-from app.models.task import CreateTaskRequest
+from app.models.task import CreateTaskRequest, UpdateTaskRequest
 from app.models.userstory import CreateUserStoryRequest, UpdateUserStoryRequest
 from app.services.project_service import ProjectService
 from app.services.task_service import TaskService
@@ -65,6 +65,7 @@ This MCP server allows you to interact with Taiga project management platform us
 8. updateUserStory - Update an existing user story
 9. listUserStoryTasks - Get all tasks for a user story
 10. createTask - Create a new task within a user story
+11. updateTask - Update an existing task
 
 **Configuration:**
 
@@ -309,6 +310,49 @@ async def list_tools() -> list[Tool]:
                     },
                 },
                 "required": ["projectIdentifier", "userStoryIdentifier", "subject"],
+            },
+        ),
+        Tool(
+            name="updateTask",
+            description="Update an existing task",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "taskId": {
+                        "type": "string",
+                        "description": "Task ID or reference number (e.g., '123' or '#45')",
+                    },
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug",
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Updated task title/subject (optional)",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Updated task description (optional)",
+                    },
+                    "status": {
+                        "type": "string",
+                        "description": "Status name (e.g., 'New', 'In progress', 'Done') (optional)",
+                    },
+                    "assignedTo": {
+                        "type": "string",
+                        "description": "Username or full name to assign the task to (optional)",
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Array of tags (optional)",
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "Comment to add to the task (optional)",
+                    },
+                },
+                "required": ["taskId", "projectIdentifier"],
             },
         ),
     ]
@@ -729,6 +773,100 @@ Subject: {task.subject}
 Reference: #{task.ref}
 Status: {task.status_extra_info.name if task.status_extra_info else 'Default status'}
 Project: {project_name}
+User Story: #{task.user_story_extra_info.ref if task.user_story_extra_info else 'N/A'} - {task.user_story_extra_info.subject if task.user_story_extra_info else 'N/A'}
+""",
+                    )
+                ]
+
+            elif name == "updateTask":
+                project_id, _ = await resolve_project_id(
+                    project_service, arguments["projectIdentifier"]
+                )
+
+                # Resolve task ID (support both ID and #ref)
+                task_identifier = arguments["taskId"]
+                if task_identifier.startswith("#"):
+                    current_task = await task_service.get_task_by_ref(
+                        int(task_identifier[1:]), project_id
+                    )
+                else:
+                    current_task = await task_service.get_task(int(task_identifier))
+                task_id = current_task.id
+
+                # Build update request
+                update_data = {"version": current_task.version}
+
+                if "subject" in arguments:
+                    update_data["subject"] = arguments["subject"]
+                if "description" in arguments:
+                    update_data["description"] = arguments["description"]
+                if "tags" in arguments:
+                    update_data["tags"] = arguments["tags"]
+                if "comment" in arguments and arguments["comment"]:
+                    update_data["comment"] = arguments["comment"]
+
+                # Resolve status if provided
+                if "status" in arguments and arguments["status"]:
+                    statuses = await task_service.get_task_statuses(project_id)
+                    status_found = False
+                    for status in statuses:
+                        if status.name.lower() == arguments["status"].lower():
+                            update_data["status"] = status.id
+                            status_found = True
+                            break
+                    if not status_found:
+                        status_names = ", ".join([s.name for s in statuses])
+                        return [
+                            TextContent(
+                                type="text",
+                                text=f"Error: Status '{arguments['status']}' not found. Available statuses: {status_names}",
+                            )
+                        ]
+
+                # Resolve assigned user if provided
+                if "assignedTo" in arguments and arguments["assignedTo"]:
+                    members = await project_service.list_project_members(project_id)
+                    member_found = False
+                    for member in members:
+                        username = member.username or (member.user_extra_info.get("username") if member.user_extra_info else None)
+                        full_name = member.full_name or (member.user_extra_info.get("full_name") if member.user_extra_info else None)
+
+                        if username and username.lower() == arguments["assignedTo"].lower():
+                            update_data["assigned_to"] = member.user
+                            member_found = True
+                            break
+                        if full_name and full_name.lower() == arguments["assignedTo"].lower():
+                            update_data["assigned_to"] = member.user
+                            member_found = True
+                            break
+
+                    if not member_found:
+                        usernames = ", ".join([
+                            m.username or (m.user_extra_info.get("username") if m.user_extra_info else "unknown")
+                            for m in members
+                        ])
+                        return [
+                            TextContent(
+                                type="text",
+                                text=f"Error: User '{arguments['assignedTo']}' not found in project. Available members: {usernames}",
+                            )
+                        ]
+
+                logger.debug(f"Update data being sent: {update_data}")
+                request = UpdateTaskRequest(**update_data)
+                task = await task_service.update_task(task_id, request)
+
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"""Task updated successfully!
+
+Subject: {task.subject}
+Reference: #{task.ref}
+Status: {task.status_extra_info.name if task.status_extra_info else 'Unknown'}
+Assigned to: {task.assigned_to_extra_info.full_name if task.assigned_to_extra_info else 'Unassigned'}
+Tags: {', '.join(task.tags) if task.tags else 'None'}
+Project: {task.project_extra_info.name if task.project_extra_info else 'N/A'}
 User Story: #{task.user_story_extra_info.ref if task.user_story_extra_info else 'N/A'} - {task.user_story_extra_info.subject if task.user_story_extra_info else 'N/A'}
 """,
                     )
