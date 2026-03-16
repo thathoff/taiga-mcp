@@ -15,6 +15,7 @@ from app.core.client import TaigaClient
 from app.core.exceptions import TaigaMCPError
 from app.models.task import CreateTaskRequest, UpdateTaskRequest
 from app.models.userstory import CreateUserStoryRequest, UpdateUserStoryRequest
+from app.services.milestone_service import MilestoneService
 from app.services.project_service import ProjectService
 from app.services.task_service import TaskService
 from app.services.user_service import UserService
@@ -66,6 +67,8 @@ This MCP server allows you to interact with Taiga project management platform us
 9. listUserStoryTasks - Get all tasks for a user story
 10. createTask - Create a new task within a user story
 11. updateTask - Update an existing task
+12. listMilestones - List sprints (milestones) in a project
+13. getMilestone - Get detailed sprint (milestone) information
 
 **Configuration:**
 
@@ -355,6 +358,38 @@ async def list_tools() -> list[Tool]:
                 "required": ["taskId", "projectIdentifier"],
             },
         ),
+        Tool(
+            name="listMilestones",
+            description="List sprints (milestones) in a project",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug",
+                    },
+                    "closed": {
+                        "type": "boolean",
+                        "description": "Filter by closed status (optional, omit to list all)",
+                    },
+                },
+                "required": ["projectIdentifier"],
+            },
+        ),
+        Tool(
+            name="getMilestone",
+            description="Get detailed information about a specific sprint (milestone)",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "milestoneId": {
+                        "type": "number",
+                        "description": "Milestone (sprint) ID",
+                    },
+                },
+                "required": ["milestoneId"],
+            },
+        ),
     ]
 
 
@@ -405,6 +440,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             project_service = ProjectService(client)
             userstory_service = UserStoryService(client)
             task_service = TaskService(client)
+            milestone_service = MilestoneService(client)
             user_service = UserService(client)
 
             if name == "authenticate":
@@ -870,6 +906,71 @@ Tags: {', '.join(task.tags) if task.tags else 'None'}
 Project: {task.project_extra_info.name if task.project_extra_info else 'N/A'}
 User Story: #{task.user_story_extra_info.ref if task.user_story_extra_info else 'N/A'} - {task.user_story_extra_info.subject if task.user_story_extra_info else 'N/A'}
 """,
+                    )
+                ]
+
+            elif name == "listMilestones":
+                project_id, project_name = await resolve_project_id(
+                    project_service, arguments["projectIdentifier"]
+                )
+                closed = arguments.get("closed")
+                milestones = await milestone_service.list_milestones(project_id, closed=closed)
+
+                if not milestones:
+                    return [
+                        TextContent(
+                            type="text",
+                            text="No sprints (milestones) found in this project.",
+                        )
+                    ]
+
+                milestone_list = "\n".join(
+                    [
+                        f"- {m.name} (ID: {m.id}, "
+                        f"Start: {m.estimated_start or 'Not set'}, "
+                        f"End: {m.estimated_finish or 'Not set'}, "
+                        f"Closed: {m.closed}, "
+                        f"Points: {m.closed_points or 0}/{m.total_points or 0})"
+                        for m in milestones
+                    ]
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Sprints in {project_name}:\n\n{milestone_list}",
+                    )
+                ]
+
+            elif name == "getMilestone":
+                milestone = await milestone_service.get_milestone(
+                    int(arguments["milestoneId"])
+                )
+
+                stories_display = ""
+                if milestone.user_stories:
+                    stories_display = "\n\nUser Stories:\n" + "\n".join(
+                        [
+                            f"- #{s.get('ref', 'N/A')}: {s.get('subject', 'N/A')} "
+                            f"(Closed: {s.get('is_closed', False)})"
+                            for s in milestone.user_stories
+                        ]
+                    )
+
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"""Sprint Details:
+
+Name: {milestone.name}
+ID: {milestone.id}
+Slug: {milestone.slug}
+Closed: {milestone.closed}
+Start: {milestone.estimated_start or 'Not set'}
+End: {milestone.estimated_finish or 'Not set'}
+Points: {milestone.closed_points or 0}/{milestone.total_points or 0}
+Created: {milestone.created_date.strftime('%Y-%m-%d %H:%M:%S')}
+Modified: {milestone.modified_date.strftime('%Y-%m-%d %H:%M:%S')}
+{stories_display}""",
                     )
                 ]
 
