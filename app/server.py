@@ -376,6 +376,7 @@ async def resolve_user_story_id(
     project_identifier: Optional[str] = None,
 ) -> int:
     """Resolve user story identifier to ID."""
+    user_story_identifier = str(user_story_identifier).strip()
     if user_story_identifier.startswith("#"):
         if not project_identifier:
             raise ValueError(
@@ -784,7 +785,7 @@ User Story: #{task.user_story_extra_info.ref if task.user_story_extra_info else 
                 )
 
                 # Resolve task ID (support both ID and #ref)
-                task_identifier = arguments["taskId"]
+                task_identifier = str(arguments["taskId"]).strip()
                 if task_identifier.startswith("#"):
                     current_task = await task_service.get_task_by_ref(
                         int(task_identifier[1:]), project_id
