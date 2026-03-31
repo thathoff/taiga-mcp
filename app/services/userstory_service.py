@@ -19,19 +19,25 @@ class UserStoryService:
 
     async def list_user_stories(
         self,
-        project_id: int,
+        project_id: Optional[int] = None,
         page_size: int = 100,
         page: Optional[int] = None,
         fetch_all: bool = True,
+        assigned_users: Optional[int] = None,
+        watchers: Optional[int] = None,
+        is_closed: Optional[bool] = None,
     ) -> list[UserStory]:
         """
-        List user stories in a project with pagination support.
+        List user stories with pagination and filter support.
 
         Args:
-            project_id: Project ID
+            project_id: Project ID (optional, omit to list across all projects)
             page_size: Number of stories per page (1-100, default: 100)
             page: Specific page number to fetch (optional)
             fetch_all: Whether to fetch all stories across all pages (default: True)
+            assigned_users: Filter by assigned user ID
+            watchers: Filter by watcher user ID
+            is_closed: Filter by closed status
 
         Returns:
             List of user stories
@@ -40,11 +46,22 @@ class UserStoryService:
         if page_size < 1 or page_size > 100:
             raise ValueError("page_size must be between 1 and 100")
 
+        # Build base params with optional filters
+        base_params: dict = {}
+        if project_id is not None:
+            base_params["project"] = project_id
+        if assigned_users is not None:
+            base_params["assigned_users"] = assigned_users
+        if watchers is not None:
+            base_params["watchers"] = watchers
+        if is_closed is not None:
+            base_params["is_closed"] = str(is_closed).lower()
+
         # If requesting a specific page without fetch_all
         if page is not None and not fetch_all:
             data = await self.client.get(
                 "/userstories",
-                params={"project": project_id, "page_size": page_size, "page": page},
+                params={**base_params, "page_size": page_size, "page": page},
             )
             return [UserStory(**story) for story in data]
 
@@ -58,7 +75,7 @@ class UserStoryService:
                 data = await self.client.get(
                     "/userstories",
                     params={
-                        "project": project_id,
+                        **base_params,
                         "page_size": page_size,
                         "page": current_page,
                     },
@@ -81,7 +98,7 @@ class UserStoryService:
         # Default single page request
         data = await self.client.get(
             "/userstories",
-            params={"project": project_id, "page_size": page_size},
+            params={**base_params, "page_size": page_size},
         )
         return [UserStory(**story) for story in data]
 

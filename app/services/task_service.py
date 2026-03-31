@@ -1,5 +1,7 @@
 """Task service for Taiga API operations."""
 
+from typing import Optional
+
 from app.core.client import TaigaClient
 from app.models.status import TaskStatus
 from app.models.task import CreateTaskRequest, Task, UpdateTaskRequest
@@ -11,17 +13,40 @@ class TaskService:
     def __init__(self, client: TaigaClient) -> None:
         self.client = client
 
-    async def list_tasks(self, user_story_id: int) -> list[Task]:
+    async def list_tasks(
+        self,
+        user_story_id: Optional[int] = None,
+        project_id: Optional[int] = None,
+        assigned_to: Optional[int] = None,
+        watchers: Optional[int] = None,
+        status__is_closed: Optional[bool] = None,
+    ) -> list[Task]:
         """
-        List all tasks for a user story.
+        List tasks with optional filters.
 
         Args:
-            user_story_id: User story ID
+            user_story_id: Filter by user story ID
+            project_id: Filter by project ID
+            assigned_to: Filter by assigned user ID
+            watchers: Filter by watcher user ID
+            status__is_closed: Filter by closed status
 
         Returns:
             List of tasks
         """
-        data = await self.client.get("/tasks", params={"user_story": user_story_id})
+        params: dict = {}
+        if user_story_id is not None:
+            params["user_story"] = user_story_id
+        if project_id is not None:
+            params["project"] = project_id
+        if assigned_to is not None:
+            params["assigned_to"] = assigned_to
+        if watchers is not None:
+            params["watchers"] = watchers
+        if status__is_closed is not None:
+            params["status__is_closed"] = str(status__is_closed).lower()
+
+        data = await self.client.get("/tasks", params=params)
         return [Task(**task) for task in data]
 
     async def get_task_by_ref(self, ref: int, project_id: int) -> Task:

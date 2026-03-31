@@ -15,6 +15,7 @@ from app.core.client import TaigaClient
 from app.core.exceptions import TaigaMCPError
 from app.models.task import CreateTaskRequest, UpdateTaskRequest
 from app.models.userstory import CreateUserStoryRequest, UpdateUserStoryRequest
+from app.services.issue_service import IssueService
 from app.services.milestone_service import MilestoneService
 from app.services.project_service import ProjectService
 from app.services.task_service import TaskService
@@ -173,7 +174,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="listUserStories",
-            description="List user stories in a project with pagination support",
+            description="List user stories in a project with pagination and filter support",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -192,6 +193,18 @@ async def list_tools() -> list[Tool]:
                     "fetchAll": {
                         "type": "boolean",
                         "description": "Whether to fetch all stories across all pages (default: true)",
+                    },
+                    "assignedTo": {
+                        "type": "number",
+                        "description": "Filter by assigned user ID (optional)",
+                    },
+                    "watchers": {
+                        "type": "number",
+                        "description": "Filter by watcher user ID (optional)",
+                    },
+                    "isClosed": {
+                        "type": "boolean",
+                        "description": "Filter by closed status (optional, omit to list all)",
                     },
                 },
                 "required": ["projectIdentifier"],
@@ -390,6 +403,71 @@ async def list_tools() -> list[Tool]:
                 "required": ["milestoneId"],
             },
         ),
+        Tool(
+            name="listIssues",
+            description="List issues in a project with optional filters",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug",
+                    },
+                    "assignedTo": {
+                        "type": "number",
+                        "description": "Filter by assigned user ID (optional)",
+                    },
+                    "watchers": {
+                        "type": "number",
+                        "description": "Filter by watcher user ID (optional)",
+                    },
+                    "isClosed": {
+                        "type": "boolean",
+                        "description": "Filter by closed status (optional, omit to list all)",
+                    },
+                },
+                "required": ["projectIdentifier"],
+            },
+        ),
+        Tool(
+            name="listMyUserStories",
+            description="List non-closed user stories assigned to or watched by the current user, optionally filtered by project",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug (optional, omit to list across all projects)",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="listMyTasks",
+            description="List non-closed tasks assigned to or watched by the current user, optionally filtered by project",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug (optional, omit to list across all projects)",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="listMyIssues",
+            description="List non-closed issues assigned to or watched by the current user, optionally filtered by project",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug (optional, omit to list across all projects)",
+                    },
+                },
+            },
+        ),
     ]
 
 
@@ -442,6 +520,7 @@ async def call_tool(name: str, arguments: Any) -> list[TextContent]:
             task_service = TaskService(client)
             milestone_service = MilestoneService(client)
             user_service = UserService(client)
+            issue_service = IssueService(client)
 
             if name == "authenticate":
                 username = arguments.get("username")
@@ -552,9 +631,18 @@ Project: {project_name}
                 page_size = arguments.get("pageSize", 100)
                 page = arguments.get("page")
                 fetch_all = arguments.get("fetchAll", True)
+                assigned_to = arguments.get("assignedTo")
+                watchers_filter = arguments.get("watchers")
+                is_closed = arguments.get("isClosed")
 
                 stories = await userstory_service.list_user_stories(
-                    project_id, page_size=page_size, page=page, fetch_all=fetch_all
+                    project_id,
+                    page_size=page_size,
+                    page=page,
+                    fetch_all=fetch_all,
+                    assigned_users=assigned_to,
+                    watchers=watchers_filter,
+                    is_closed=is_closed,
                 )
 
                 if not stories:
@@ -971,6 +1059,202 @@ Points: {milestone.closed_points or 0}/{milestone.total_points or 0}
 Created: {milestone.created_date.strftime('%Y-%m-%d %H:%M:%S')}
 Modified: {milestone.modified_date.strftime('%Y-%m-%d %H:%M:%S')}
 {stories_display}""",
+                    )
+                ]
+
+            elif name == "listIssues":
+                project_id, project_name = await resolve_project_id(
+                    project_service, arguments["projectIdentifier"]
+                )
+                assigned_to = arguments.get("assignedTo")
+                watchers_filter = arguments.get("watchers")
+                is_closed = arguments.get("isClosed")
+
+                issues = await issue_service.list_issues(
+                    project_id,
+                    assigned_to=assigned_to,
+                    watchers=watchers_filter,
+                    status__is_closed=is_closed,
+                )
+
+                if not issues:
+                    return [
+                        TextContent(
+                            type="text",
+                            text="No issues found matching the filters.",
+                        )
+                    ]
+
+                issue_list = "\n".join(
+                    [
+                        f"- #{i.ref}: {i.subject} (Status: {i.status_extra_info.name if i.status_extra_info else 'Unknown'}, "
+                        f"Assigned: {i.assigned_to_extra_info.full_name if i.assigned_to_extra_info else 'Unassigned'})"
+                        for i in issues
+                    ]
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Issues in {project_name}:\n\n{issue_list}",
+                    )
+                ]
+
+            elif name == "listMyUserStories":
+                project_id = None
+                scope_label = "all projects"
+                if arguments.get("projectIdentifier"):
+                    project_id, project_name = await resolve_project_id(
+                        project_service, arguments["projectIdentifier"]
+                    )
+                    scope_label = project_name
+
+                current_user = await user_service.get_current_user()
+                user_id = current_user.id
+
+                # Fetch assigned and watched stories in parallel
+                assigned_stories, watched_stories = await asyncio.gather(
+                    userstory_service.list_user_stories(
+                        project_id, assigned_users=user_id, is_closed=False
+                    ),
+                    userstory_service.list_user_stories(
+                        project_id, watchers=user_id, is_closed=False
+                    ),
+                )
+
+                # Merge and deduplicate by ID
+                seen_ids: set[int] = set()
+                stories: list = []
+                for story in assigned_stories + watched_stories:
+                    if story.id not in seen_ids:
+                        seen_ids.add(story.id)
+                        stories.append(story)
+
+                if not stories:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"No open user stories assigned to or watched by you in {scope_label}.",
+                        )
+                    ]
+
+                story_list = "\n".join(
+                    [
+                        f"- #{s.ref}: {s.subject} "
+                        f"(Project: {s.project_extra_info.name if s.project_extra_info else 'N/A'}, "
+                        f"Status: {s.status_extra_info.name if s.status_extra_info else 'Unknown'}, "
+                        f"Assigned: {s.assigned_to_extra_info.full_name if s.assigned_to_extra_info else 'Unassigned'})"
+                        for s in stories
+                    ]
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Your open user stories in {scope_label} ({len(stories)}):\n\n{story_list}",
+                    )
+                ]
+
+            elif name == "listMyTasks":
+                project_id = None
+                scope_label = "all projects"
+                if arguments.get("projectIdentifier"):
+                    project_id, project_name = await resolve_project_id(
+                        project_service, arguments["projectIdentifier"]
+                    )
+                    scope_label = project_name
+
+                current_user = await user_service.get_current_user()
+                user_id = current_user.id
+
+                assigned_tasks, watched_tasks = await asyncio.gather(
+                    task_service.list_tasks(
+                        project_id=project_id, assigned_to=user_id, status__is_closed=False
+                    ),
+                    task_service.list_tasks(
+                        project_id=project_id, watchers=user_id, status__is_closed=False
+                    ),
+                )
+
+                seen_ids: set[int] = set()
+                tasks: list = []
+                for task in assigned_tasks + watched_tasks:
+                    if task.id not in seen_ids:
+                        seen_ids.add(task.id)
+                        tasks.append(task)
+
+                if not tasks:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"No open tasks assigned to or watched by you in {scope_label}.",
+                        )
+                    ]
+
+                task_list = "\n".join(
+                    [
+                        f"- #{t.ref}: {t.subject} "
+                        f"(Project: {t.project_extra_info.name if t.project_extra_info else 'N/A'}, "
+                        f"Status: {t.status_extra_info.name if t.status_extra_info else 'Unknown'}, "
+                        f"Assigned: {t.assigned_to_extra_info.full_name if t.assigned_to_extra_info else 'Unassigned'}, "
+                        f"Story: #{t.user_story_extra_info.ref if t.user_story_extra_info else 'N/A'})"
+                        for t in tasks
+                    ]
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Your open tasks in {scope_label} ({len(tasks)}):\n\n{task_list}",
+                    )
+                ]
+
+            elif name == "listMyIssues":
+                project_id = None
+                scope_label = "all projects"
+                if arguments.get("projectIdentifier"):
+                    project_id, project_name = await resolve_project_id(
+                        project_service, arguments["projectIdentifier"]
+                    )
+                    scope_label = project_name
+
+                current_user = await user_service.get_current_user()
+                user_id = current_user.id
+
+                assigned_issues, watched_issues = await asyncio.gather(
+                    issue_service.list_issues(
+                        project_id, assigned_to=user_id, status__is_closed=False
+                    ),
+                    issue_service.list_issues(
+                        project_id, watchers=user_id, status__is_closed=False
+                    ),
+                )
+
+                seen_ids: set[int] = set()
+                issues: list = []
+                for issue in assigned_issues + watched_issues:
+                    if issue.id not in seen_ids:
+                        seen_ids.add(issue.id)
+                        issues.append(issue)
+
+                if not issues:
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"No open issues assigned to or watched by you in {scope_label}.",
+                        )
+                    ]
+
+                issue_list = "\n".join(
+                    [
+                        f"- #{i.ref}: {i.subject} "
+                        f"(Project: {i.project_extra_info.name if i.project_extra_info else 'N/A'}, "
+                        f"Status: {i.status_extra_info.name if i.status_extra_info else 'Unknown'}, "
+                        f"Assigned: {i.assigned_to_extra_info.full_name if i.assigned_to_extra_info else 'Unassigned'})"
+                        for i in issues
+                    ]
+                )
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Your open issues in {scope_label} ({len(issues)}):\n\n{issue_list}",
                     )
                 ]
 
