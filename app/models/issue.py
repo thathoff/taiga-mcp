@@ -61,3 +61,15 @@ class Issue(BaseModel):
 
     class Config:
         populate_by_name = True
+
+
+class UpdateIssueRequest(BaseModel):
+    """Request model for updating an issue."""
+
+    version: int
+    subject: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[int] = None
+    assigned_to: Optional[int] = None
+    tags: Optional[list[str]] = None
+    comment: Optional[str] = None

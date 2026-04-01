@@ -3,7 +3,7 @@
 from typing import Optional
 
 from app.core.client import TaigaClient
-from app.models.issue import Issue
+from app.models.issue import Issue, UpdateIssueRequest
 from app.models.status import IssueStatus
 
 
@@ -48,6 +48,23 @@ class IssueService:
     async def get_issue(self, issue_id: int) -> Issue:
         """Get issue details."""
         data = await self.client.get(f"/issues/{issue_id}")
+        return Issue(**data)
+
+    async def get_issue_by_ref(self, ref: int, project_id: int) -> Issue:
+        """Get issue by reference number and project ID."""
+        data = await self.client.get(
+            "/issues/by_ref", params={"ref": ref, "project": project_id}
+        )
+        return Issue(**data)
+
+    async def update_issue(
+        self, issue_id: int, request: UpdateIssueRequest
+    ) -> Issue:
+        """Update an existing issue."""
+        data = await self.client.patch(
+            f"/issues/{issue_id}",
+            request.model_dump(exclude_none=True),
+        )
         return Issue(**data)
 
     async def get_issue_statuses(self, project_id: int) -> list[IssueStatus]:

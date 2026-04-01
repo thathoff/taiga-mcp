@@ -13,6 +13,7 @@ from app.config import settings
 from app.core.auth import auth_manager
 from app.core.client import TaigaClient
 from app.core.exceptions import TaigaMCPError
+from app.models.issue import UpdateIssueRequest
 from app.models.task import CreateTaskRequest, UpdateTaskRequest
 from app.models.userstory import CreateUserStoryRequest, UpdateUserStoryRequest
 from app.services.issue_service import IssueService
@@ -466,6 +467,72 @@ async def list_tools() -> list[Tool]:
                         "description": "Project ID or slug (optional, omit to list across all projects)",
                     },
                 },
+            },
+        ),
+        Tool(
+            name="commentUserStory",
+            description="Add a comment to a user story",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "userStoryIdentifier": {
+                        "type": "string",
+                        "description": "User story ID or reference number (e.g., '123' or '#45')",
+                    },
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug (required if using reference number)",
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "Comment text to add",
+                    },
+                },
+                "required": ["userStoryIdentifier", "comment"],
+            },
+        ),
+        Tool(
+            name="commentTask",
+            description="Add a comment to a task",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "taskId": {
+                        "type": "string",
+                        "description": "Task ID or reference number (e.g., '123' or '#45')",
+                    },
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug (required if using reference number)",
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "Comment text to add",
+                    },
+                },
+                "required": ["taskId", "projectIdentifier", "comment"],
+            },
+        ),
+        Tool(
+            name="commentIssue",
+            description="Add a comment to an issue",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "issueId": {
+                        "type": "string",
+                        "description": "Issue ID or reference number (e.g., '123' or '#45')",
+                    },
+                    "projectIdentifier": {
+                        "type": "string",
+                        "description": "Project ID or slug (required if using reference number)",
+                    },
+                    "comment": {
+                        "type": "string",
+                        "description": "Comment text to add",
+                    },
+                },
+                "required": ["issueId", "projectIdentifier", "comment"],
             },
         ),
     ]
@@ -1255,6 +1322,74 @@ Modified: {milestone.modified_date.strftime('%Y-%m-%d %H:%M:%S')}
                     TextContent(
                         type="text",
                         text=f"Your open issues in {scope_label} ({len(issues)}):\n\n{issue_list}",
+                    )
+                ]
+
+            elif name == "commentUserStory":
+                user_story_id = await resolve_user_story_id(
+                    userstory_service,
+                    project_service,
+                    arguments["userStoryIdentifier"],
+                    arguments.get("projectIdentifier"),
+                )
+                current_story = await userstory_service.get_user_story(user_story_id)
+                request = UpdateUserStoryRequest(
+                    version=current_story.version,
+                    comment=arguments["comment"],
+                )
+                story = await userstory_service.update_user_story(user_story_id, request)
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Comment added to user story #{story.ref}: {story.subject}",
+                    )
+                ]
+
+            elif name == "commentTask":
+                project_id, _ = await resolve_project_id(
+                    project_service, arguments["projectIdentifier"]
+                )
+                task_identifier = str(arguments["taskId"]).strip()
+                if task_identifier.startswith("#"):
+                    current_task = await task_service.get_task_by_ref(
+                        int(task_identifier[1:]), project_id
+                    )
+                else:
+                    current_task = await task_service.get_task(int(task_identifier))
+
+                request = UpdateTaskRequest(
+                    version=current_task.version,
+                    comment=arguments["comment"],
+                )
+                task = await task_service.update_task(current_task.id, request)
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Comment added to task #{task.ref}: {task.subject}",
+                    )
+                ]
+
+            elif name == "commentIssue":
+                project_id, _ = await resolve_project_id(
+                    project_service, arguments["projectIdentifier"]
+                )
+                issue_identifier = str(arguments["issueId"]).strip()
+                if issue_identifier.startswith("#"):
+                    current_issue = await issue_service.get_issue_by_ref(
+                        int(issue_identifier[1:]), project_id
+                    )
+                else:
+                    current_issue = await issue_service.get_issue(int(issue_identifier))
+
+                request = UpdateIssueRequest(
+                    version=current_issue.version,
+                    comment=arguments["comment"],
+                )
+                issue = await issue_service.update_issue(current_issue.id, request)
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Comment added to issue #{issue.ref}: {issue.subject}",
                     )
                 ]
 

@@ -94,3 +94,4 @@ class UpdateUserStoryRequest(BaseModel):
     tags: Optional[list[str]] = None
     points: Optional[Any] = None  # Can be string, float, or dict for role-based points
     due_date: Optional[str] = None  # YYYY-MM-DD format
+    comment: Optional[str] = None
