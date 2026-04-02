@@ -728,6 +728,7 @@ Project: {project_name}
                 story_list = "\n".join(
                     [
                         f"- #{s.ref}: {s.subject} (Status: {s.status_extra_info.name if s.status_extra_info else 'Unknown'})"
+                        + (f" [BLOCKED: {s.blocked_note or 'Yes'}]" if s.is_blocked else "")
                         for s in stories
                     ]
                 )
@@ -765,6 +766,7 @@ Description: {story.description or 'No description'}
 Status: {story.status_extra_info.name if story.status_extra_info else 'Unknown'}
 Assigned to: {story.assigned_to_extra_info.full_name if story.assigned_to_extra_info else 'Unassigned'}
 Points: {points_display}
+Blocked: {('Yes - ' + story.blocked_note) if story.is_blocked and story.blocked_note else ('Yes' if story.is_blocked else 'No')}
 Tags: {', '.join(story.tags) if story.tags else 'None'}
 Due Date: {story.due_date or 'Not set'}
 Created: {story.created_date.strftime('%Y-%m-%d %H:%M:%S')}
@@ -890,6 +892,7 @@ Reference: #{story.ref}
 Status: {story.status_extra_info.name if story.status_extra_info else 'Unknown'}
 Assigned to: {story.assigned_to_extra_info.full_name if story.assigned_to_extra_info else 'Unassigned'}
 Points: {points_display}
+Blocked: {('Yes - ' + story.blocked_note) if story.is_blocked and story.blocked_note else ('Yes' if story.is_blocked else 'No')}
 Project: {story.project_extra_info.name if story.project_extra_info else 'N/A'}
 """,
                     )
@@ -1210,6 +1213,7 @@ Modified: {milestone.modified_date.strftime('%Y-%m-%d %H:%M:%S')}
                         f"(Project: {s.project_extra_info.name if s.project_extra_info else 'N/A'}, "
                         f"Status: {s.status_extra_info.name if s.status_extra_info else 'Unknown'}, "
                         f"Assigned: {s.assigned_to_extra_info.full_name if s.assigned_to_extra_info else 'Unassigned'})"
+                        + (f" [BLOCKED: {s.blocked_note or 'Yes'}]" if s.is_blocked else "")
                         for s in stories
                     ]
                 )

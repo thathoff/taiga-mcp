@@ -40,6 +40,7 @@ class UserStory(BaseModel):
     tags: list[str] = Field(default_factory=list)
     is_closed: bool = False
     is_blocked: bool = False
+    blocked_note: Optional[str] = None
     points: Optional[Any] = None  # Can be dict or string
     total_points: Optional[float] = None
     project_extra_info: Optional[ProjectExtraInfo] = None
